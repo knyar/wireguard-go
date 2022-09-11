@@ -46,8 +46,8 @@ func (device *Device) startRouteListener(bind conn.Bind) (*rwcancel.RWCancel, er
 
 func (device *Device) routineRouteListener(bind conn.Bind, netlinkSock int, netlinkCancel *rwcancel.RWCancel) {
 	type peerEndpointPtr struct {
-		peer     *Peer
-		endpoint *conn.Endpoint
+		peer      *Peer
+		endpoints []*conn.Endpoint
 	}
 	var reqPeer map[uint32]peerEndpointPtr
 	var reqPeerLock sync.Mutex
@@ -108,15 +108,15 @@ func (device *Device) routineRouteListener(bind conn.Bind, netlinkSock int, netl
 									break
 								}
 								pePtr.peer.Lock()
-								if &pePtr.peer.endpoint != pePtr.endpoint {
-									pePtr.peer.Unlock()
-									break
+								for idx, peerEndpoint := range pePtr.peer.endpoints {
+									if &peerEndpoint != pePtr.endpoints[idx] {
+										continue
+									}
+									if uint32(peerEndpoint.(*conn.LinuxSocketEndpoint).Src4().Ifindex) == ifidx {
+										continue
+									}
+									peerEndpoint.(*conn.LinuxSocketEndpoint).ClearSrc()
 								}
-								if uint32(pePtr.peer.endpoint.(*conn.LinuxSocketEndpoint).Src4().Ifindex) == ifidx {
-									pePtr.peer.Unlock()
-									break
-								}
-								pePtr.peer.endpoint.(*conn.LinuxSocketEndpoint).ClearSrc()
 								pePtr.peer.Unlock()
 							}
 							attr = attr[attrhdr.Len:]
@@ -132,68 +132,74 @@ func (device *Device) routineRouteListener(bind conn.Bind, netlinkSock int, netl
 					i := uint32(1)
 					for _, peer := range device.peers.keyMap {
 						peer.RLock()
-						if peer.endpoint == nil {
-							peer.RUnlock()
-							continue
+						var endpoints []*conn.Endpoint
+						var nativeEPs []*conn.LinuxSocketEndpoint
+
+						for _, endpoint := range peer.endpoints {
+							nativeEP, _ := endpoint.(*conn.LinuxSocketEndpoint)
+							if nativeEP == nil {
+								continue
+							}
+							if nativeEP.IsV6() || nativeEP.Src4().Ifindex == 0 {
+								continue
+							}
+							endpoints = append(endpoints, &endpoint)
+							nativeEPs = append(nativeEPs, nativeEP)
 						}
-						nativeEP, _ := peer.endpoint.(*conn.LinuxSocketEndpoint)
-						if nativeEP == nil {
-							peer.RUnlock()
-							continue
+						peer.RUnlock()
+
+						for _, nativeEP := range nativeEPs {
+							nlmsg := struct {
+								hdr     unix.NlMsghdr
+								msg     unix.RtMsg
+								dsthdr  unix.RtAttr
+								dst     [4]byte
+								srchdr  unix.RtAttr
+								src     [4]byte
+								markhdr unix.RtAttr
+								mark    uint32
+							}{
+								unix.NlMsghdr{
+									Type:  uint16(unix.RTM_GETROUTE),
+									Flags: unix.NLM_F_REQUEST,
+									Seq:   i,
+								},
+								unix.RtMsg{
+									Family:  unix.AF_INET,
+									Dst_len: 32,
+									Src_len: 32,
+								},
+								unix.RtAttr{
+									Len:  8,
+									Type: unix.RTA_DST,
+								},
+								nativeEP.Dst4().Addr,
+								unix.RtAttr{
+									Len:  8,
+									Type: unix.RTA_SRC,
+								},
+								nativeEP.Src4().Src,
+								unix.RtAttr{
+									Len:  8,
+									Type: unix.RTA_MARK,
+								},
+								device.net.fwmark,
+							}
+							nlmsg.hdr.Len = uint32(unsafe.Sizeof(nlmsg))
+
+							_, err := netlinkCancel.Write((*[unsafe.Sizeof(nlmsg)]byte)(unsafe.Pointer(&nlmsg))[:])
+							if err != nil {
+								device.log.Errorf("netlink Write(%+v) failed: %s", nlmsg, err)
+							}
+							i++
 						}
-						if nativeEP.IsV6() || nativeEP.Src4().Ifindex == 0 {
-							peer.RUnlock()
-							break
-						}
-						nlmsg := struct {
-							hdr     unix.NlMsghdr
-							msg     unix.RtMsg
-							dsthdr  unix.RtAttr
-							dst     [4]byte
-							srchdr  unix.RtAttr
-							src     [4]byte
-							markhdr unix.RtAttr
-							mark    uint32
-						}{
-							unix.NlMsghdr{
-								Type:  uint16(unix.RTM_GETROUTE),
-								Flags: unix.NLM_F_REQUEST,
-								Seq:   i,
-							},
-							unix.RtMsg{
-								Family:  unix.AF_INET,
-								Dst_len: 32,
-								Src_len: 32,
-							},
-							unix.RtAttr{
-								Len:  8,
-								Type: unix.RTA_DST,
-							},
-							nativeEP.Dst4().Addr,
-							unix.RtAttr{
-								Len:  8,
-								Type: unix.RTA_SRC,
-							},
-							nativeEP.Src4().Src,
-							unix.RtAttr{
-								Len:  8,
-								Type: unix.RTA_MARK,
-							},
-							device.net.fwmark,
-						}
-						nlmsg.hdr.Len = uint32(unsafe.Sizeof(nlmsg))
+
 						reqPeerLock.Lock()
 						reqPeer[i] = peerEndpointPtr{
-							peer:     peer,
-							endpoint: &peer.endpoint,
+							peer:      peer,
+							endpoints: endpoints,
 						}
 						reqPeerLock.Unlock()
-						peer.RUnlock()
-						i++
-						_, err := netlinkCancel.Write((*[unsafe.Sizeof(nlmsg)]byte)(unsafe.Pointer(&nlmsg))[:])
-						if err != nil {
-							break
-						}
 					}
 					device.peers.RUnlock()
 				}()

@@ -8,6 +8,7 @@ package device
 import (
 	"container/list"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,7 +22,7 @@ type Peer struct {
 	keypairs     Keypairs
 	handshake    Handshake
 	device       *Device
-	endpoint     conn.Endpoint
+	endpoints    []conn.Endpoint
 	stopping     sync.WaitGroup // routines pending stop
 
 	// These fields are accessed with atomic operations, which must be
@@ -105,7 +106,7 @@ func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
 	handshake.mutex.Unlock()
 
 	// reset endpoint
-	peer.endpoint = nil
+	peer.endpoints = nil
 
 	// init timers
 	peer.timersInit()
@@ -127,15 +128,25 @@ func (peer *Peer) SendBuffer(buffer []byte) error {
 	peer.RLock()
 	defer peer.RUnlock()
 
-	if peer.endpoint == nil {
-		return errors.New("no known endpoint for peer")
+	if len(peer.endpoints) == 0 {
+		return errors.New("no known endpoints for peer")
 	}
 
-	err := peer.device.net.bind.Send(buffer, peer.endpoint)
-	if err == nil {
+	var errs []error
+	for _, endpoint := range peer.endpoints {
+		if err := peer.device.net.bind.Send(buffer, endpoint); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) < len(peer.endpoints) {
 		atomic.AddUint64(&peer.stats.txBytes, uint64(len(buffer)))
 	}
-	return err
+	if len(errs) == 1 {
+		return errs[0]
+	} else if len(errs) > 1 {
+		return fmt.Errorf("%w (also %s)", errs[0], errs[1:])
+	}
+	return nil
 }
 
 func (peer *Peer) String() string {
@@ -272,6 +283,17 @@ func (peer *Peer) SetEndpointFromPacket(endpoint conn.Endpoint) {
 		return
 	}
 	peer.Lock()
-	peer.endpoint = endpoint
-	peer.Unlock()
+	defer peer.Unlock()
+	for idx, e := range peer.endpoints {
+		if e == endpoint {
+			return
+		}
+		if e.SrcToString() != "" && e.SrcToString() == endpoint.SrcToString() {
+			// Update existing endpoint for the same source address.
+			peer.endpoints[idx] = endpoint
+			return
+		}
+	}
+	// Not found: add a new endpoint.
+	peer.endpoints = append(peer.endpoints, endpoint)
 }

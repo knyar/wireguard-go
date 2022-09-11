@@ -447,8 +447,10 @@ func (device *Device) BindSetMark(mark uint32) error {
 	for _, peer := range device.peers.keyMap {
 		peer.Lock()
 		defer peer.Unlock()
-		if peer.endpoint != nil {
-			peer.endpoint.ClearSrc()
+		for _, endpoint := range peer.endpoints {
+			if endpoint != nil {
+				endpoint.ClearSrc()
+			}
 		}
 	}
 	device.peers.RUnlock()
@@ -499,8 +501,10 @@ func (device *Device) BindUpdate() error {
 	for _, peer := range device.peers.keyMap {
 		peer.Lock()
 		defer peer.Unlock()
-		if peer.endpoint != nil {
-			peer.endpoint.ClearSrc()
+		for _, endpoint := range peer.endpoints {
+			if endpoint != nil {
+				endpoint.ClearSrc()
+			}
 		}
 	}
 	device.peers.RUnlock()

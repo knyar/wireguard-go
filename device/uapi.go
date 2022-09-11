@@ -108,8 +108,12 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
 				keyf("public_key", (*[32]byte)(&peer.handshake.remoteStatic))
 				keyf("preshared_key", (*[32]byte)(&peer.handshake.presharedKey))
 				sendf("protocol_version=1")
-				if peer.endpoint != nil {
-					sendf("endpoint=%s", peer.endpoint.DstToString())
+				if len(peer.endpoints) > 0 {
+					var endpoints []string
+					for _, endpoint := range peer.endpoints {
+						endpoints = append(endpoints, endpoint.DstToString())
+					}
+					sendf("endpoint=%s", strings.Join(endpoints, ","))
 				}
 
 				nano := atomic.LoadInt64(&peer.stats.lastHandshakeNano)
@@ -263,7 +267,7 @@ func (peer *ipcSetPeer) handlePostConfig() {
 		return
 	}
 	if peer.created {
-		peer.disableRoaming = peer.device.net.brokenRoaming && peer.endpoint != nil
+		peer.disableRoaming = peer.device.net.brokenRoaming && len(peer.endpoints) > 0
 	}
 	if peer.device.isUp() {
 		peer.Start()
@@ -342,13 +346,15 @@ func (device *Device) handlePeerLine(peer *ipcSetPeer, key, value string) error 
 
 	case "endpoint":
 		device.log.Verbosef("%v - UAPI: Updating endpoint", peer.Peer)
-		endpoint, err := device.net.bind.ParseEndpoint(value)
-		if err != nil {
-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set endpoint %v: %w", value, err)
-		}
 		peer.Lock()
-		defer peer.Unlock()
-		peer.endpoint = endpoint
+		for _, endpointStr := range strings.Split(value, ",") {
+			endpoint, err := device.net.bind.ParseEndpoint(endpointStr)
+			if err != nil {
+				return ipcErrorf(ipc.IpcErrorInvalid, "failed to set endpoint %v: %w", value, err)
+			}
+			peer.endpoints = append(peer.endpoints, endpoint)
+		}
+		peer.Unlock()
 
 	case "persistent_keepalive_interval":
 		device.log.Verbosef("%v - UAPI: Updating persistent keepalive interval", peer.Peer)

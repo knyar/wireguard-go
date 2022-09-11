@@ -413,11 +413,11 @@ func (peer *Peer) RoutineSequentialReceiver() {
 			goto skip
 		}
 
+		peer.SetEndpointFromPacket(elem.endpoint)
 		if !elem.keypair.replayFilter.ValidateCounter(elem.counter, RejectAfterMessages) {
 			goto skip
 		}
 
-		peer.SetEndpointFromPacket(elem.endpoint)
 		if peer.ReceivedWithKeypair(elem.keypair) {
 			peer.timersHandshakeComplete()
 			peer.SendStagedPackets()
