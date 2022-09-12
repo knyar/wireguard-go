@@ -1,77 +1,213 @@
-# Go Implementation of [WireGuard](https://www.wireguard.com/)
+# wireguard-dup
 
-This is an implementation of WireGuard in Go.
+This is a fork of wireguard-go that supports multiple endpoints per peer. When
+a peer has multiple endpoints, encapsulated traffic is transmitted to all of them,
+with duplicate packets dropped on the other end. The main use case for this is
+to allow using several independent internet connections in a "mirror" mode.
 
-## Usage
+Please see the [main wireguard-go repo](https://github.com/WireGuard/wireguard-go)
+for the original `README.md` file.
 
-Most Linux kernel WireGuard users are used to adding an interface with `ip link add wg0 type wireguard`. With wireguard-go, instead simply run:
+## How to use this
 
-```
-$ wireguard-go wg0
-```
+The instructions below assume a Linux based server, and a MacOS client device that
+has two internet connections: wifi (primary one) and a mobile phone tethered via
+USB (secondary).
 
-This will create an interface and fork into the background. To remove the interface, use the usual `ip link del wg0`, or if your system does not support removing interfaces directly, you may instead remove the control socket via `rm -f /var/run/wireguard/wg0.sock`, which will result in wireguard-go shutting down.
+You will need to choose the following pieces of configuration:
 
-To run wireguard-go without forking to the background, pass `-f` or `--foreground`:
+- Tunnel network (`VPN_NET`) and IP addresses used by the server (`VPN_SERVER_IP`)
+  and client (`VPN_CLIENT_IP`)
+- Two UDP ports on the server that will be used by the client (`SERVER_PORT1`,
+  `SERVER_PORT2`)
+- Client and server interface names (`VPN_SERVER_IF`, `VPN_CLIENT_IF`) that don't
+  clash with any of your existing interfaces.
 
-```
-$ wireguard-go -f wg0
-```
+Generate server and client keys:
 
-When an interface is running, you may use [`wg(8)`](https://git.zx2c4.com/wireguard-tools/about/src/man/wg.8) to configure it, as well as the usual `ip(8)` and `ifconfig(8)` commands.
-
-To run with more logging you may set the environment variable `LOG_LEVEL=debug`.
-
-## Platforms
-
-### Linux
-
-This will run on Linux; however you should instead use the kernel module, which is faster and better integrated into the OS. See the [installation page](https://www.wireguard.com/install/) for instructions.
-
-### macOS
-
-This runs on macOS using the utun driver. It does not yet support sticky sockets, and won't support fwmarks because of Darwin limitations. Since the utun driver cannot have arbitrary interface names, you must either use `utun[0-9]+` for an explicit interface name or `utun` to have the kernel select one for you. If you choose `utun` as the interface name, and the environment variable `WG_TUN_NAME_FILE` is defined, then the actual name of the interface chosen by the kernel is written to the file specified by that variable.
-
-### Windows
-
-This runs on Windows, but you should instead use it from the more [fully featured Windows app](https://git.zx2c4.com/wireguard-windows/about/), which uses this as a module.
-
-### FreeBSD
-
-This will run on FreeBSD. It does not yet support sticky sockets. Fwmark is mapped to `SO_USER_COOKIE`.
-
-### OpenBSD
-
-This will run on OpenBSD. It does not yet support sticky sockets. Fwmark is mapped to `SO_RTABLE`. Since the tun driver cannot have arbitrary interface names, you must either use `tun[0-9]+` for an explicit interface name or `tun` to have the program select one for you. If you choose `tun` as the interface name, and the environment variable `WG_TUN_NAME_FILE` is defined, then the actual name of the interface chosen by the kernel is written to the file specified by that variable.
-
-## Building
-
-This requires an installation of [go](https://golang.org) ≥ 1.18.
-
-```
-$ git clone https://git.zx2c4.com/wireguard-go
-$ cd wireguard-go
-$ make
+```bash
+wg genkey | tee wg-server-priv | wg pubkey > wg-server-pub
+wg genkey | tee wg-client-priv | wg pubkey > wg-client-pub
 ```
 
-## License
+Before following the instructions below, set environment variables with all
+configuration parameters on each of the machines:
 
-    Copyright (C) 2017-2021 WireGuard LLC. All Rights Reserved.
-    
-    Permission is hereby granted, free of charge, to any person obtaining a copy of
-    this software and associated documentation files (the "Software"), to deal in
-    the Software without restriction, including without limitation the rights to
-    use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-    of the Software, and to permit persons to whom the Software is furnished to do
-    so, subject to the following conditions:
-    
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-    
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
+```bash
+export VPN_NET=10.129.0.0/24
+export VPN_SERVER_IP=10.129.0.1
+export VPN_CLIENT_IP=10.129.0.2
+export VPN_SERVER_IF=wg0
+export VPN_CLIENT_IF=utun8
+export SERVER_PORT1=15001
+export SERVER_PORT2=15002
+export SERVER_EXTERNAL_IP=1.2.3.4
+export SERVER_KEY_PRIV=$(base64 -d wg-server-priv | xxd -c 100 -p)
+export SERVER_KEY_PUB=$(base64 -d wg-server-pub | xxd -c 100 -p)
+export CLIENT_KEY_PRIV=$(base64 -d wg-client-priv | xxd -c 100 -p)
+export CLIENT_KEY_PUB=$(base64 -d wg-client-pub | xxd -c 100 -p)
+```
+
+### Server Setup (Linux)
+
+- Install OpenBSD netcat (`apt install netcat-openbsd`)
+- Check out this repo somewhere (for example, to `/opt/wireguard-dup`)
+- Install a recent Go version (1.9 as of Sep 2022) following [instructions](
+    https://go.dev/doc/install)
+- Build a wireguard-go binary: `cd /opt/wireguard-dup && make`
+- If necessary, allow incoming connections to the UDP port via iptables:
+
+```bash
+iptables -A INPUT -p udp -m udp --dport $SERVER_PORT1 -j ACCEPT
+```
+
+Configure a DNAT entry for traffic for the second UDP port to be sent 
+to the first one:
+
+```bash
+iptables -t nat -A PREROUTING -d $SERVER_EXTERNAL_IP -p udp -m udp \
+  --dport $SERVER_PORT2 -j DNAT --to-destination $SERVER_EXTERNAL_IP:$SERVER_PORT1
+```
+
+Add a systemd unit file, `/etc/systemd/system/wireguard_dup.service`
+
+```bash
+cat > /etc/systemd/system/wireguard_dup.service <<EOF
+[Unit]
+Description=wireguard_dup
+Requires=network.target
+After=network.target
+
+[Service]
+Type=simple
+Environment="LOG_LEVEL=debug"
+ExecStart=/opt/wireguard-dup/wireguard-go -f $VPN_SERVER_IF
+
+ExecStartPost=/bin/sleep 3
+ExecStartPost=/sbin/ip address add dev $VPN_SERVER_IF $VPN_SERVER_IP
+ExecStartPost=/sbin/ip link set up dev $VPN_SERVER_IF
+ExecStartPost=bash -c '( \\
+  echo set=1; \\
+  echo listen_port=$SERVER_PORT1; \\
+  echo private_key=$SERVER_KEY_PRIV; \\
+  echo replace_peers=true; \\
+  echo public_key=$CLIENT_KEY_PUB; \\
+  echo replace_allowed_ips=true; \\
+  echo allowed_ip=$VPN_NET; \\
+  echo ; \\
+) | nc -W 1 -U /var/run/wireguard/$VPN_SERVER_IF.sock'
+ExecStartPost=/sbin/ip route add $VPN_NET via $VPN_SERVER_IP
+
+ExecStop=/sbin/ip link del dev $VPN_SERVER_IF
+ExecStopPost=/sbin/ip route del $VPN_NET
+TimeoutStopSec=3
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+Enable and start the service:
+
+```bash
+systemctl enable wireguard_dup
+systemctl start wireguard_dup
+```
+
+### Client Setup (Mac OS)
+
+- Check out this repo somewhere (for example, to `~/code/wireguard-dup`)
+- Install a recent Go version (1.9 as of Sep 2022) following [instructions](
+    https://go.dev/doc/install)
+- Build a wireguard-go binary: `cd ~/code/wireguard-dup && make`
+
+Add a script to run wireguard client.
+
+```bash
+cat > ~/code/wireguard-dup/run.sh <<EOF
+#!/bin/bash
+
+if [[ \$1 == "" ]]; then
+  echo "Usage: \$0 <second interface>"
+  exit 3
+fi
+SECOND_IF=\$1
+
+LOG_LEVEL=debug ~/code/wireguard-dup/wireguard-go -f $VPN_CLIENT_IF &
+
+sleep 3
+ifconfig $VPN_CLIENT_IF inet $VPN_CLIENT_IP/32 $VPN_SERVER_IP
+(
+  echo set=1;
+  echo listen_port=51821;
+  echo private_key=$CLIENT_KEY_PRIV;
+  echo replace_peers=true;
+  echo public_key=$SERVER_KEY_PUB;
+  echo replace_allowed_ips=true;
+  echo allowed_ip=$VPN_NET;
+  echo endpoint=$SERVER_EXTERNAL_IP:$SERVER_PORT1,$SERVER_EXTERNAL_IP:$SERVER_PORT2;
+  echo ;
+) | nc -U /var/run/wireguard/$VPN_CLIENT_IF.sock
+
+ifconfig $VPN_CLIENT_IF up
+
+echo Setting pf rules
+SECOND_GW=\$(netstat -nr | grep ^default.*\$SECOND_IF | awk '{ print \$2 }')
+echo "
+  nat on en0 proto udp from self to $SERVER_EXTERNAL_IP port $SERVER_PORT2 -> (\$SECOND_IF)
+  pass out on en0 route-to (\$SECOND_IF \$SECOND_GW) proto udp from self to $SERVER_EXTERNAL_IP port $SERVER_PORT2
+" | /sbin/pfctl -Ef -
+
+_exit() {
+    echo Resetting pf rules
+    /sbin/pfctl -Ef /etc/pf.conf
+}
+trap _exit SIGTERM SIGINT ERR
+
+wait \$(jobs -p)
+EOF
+chmod 755 ~/code/wireguard-dup/run.sh
+```
+
+Note that the script will completely override your existing PF firewall rules,
+instead configuring port-based routing rules for the server's second UDP port. The
+script assumes that your main internet connection is wifi (`en0`) and that both
+internet connections have default gateway set (which seems to be the case for
+iPhone USB tethering).
+
+To start VPN client, run the script, passing your second internet connection
+(tethered phone) as a command line argument - for example, if your phone is
+`en6`:
+
+```bash
+sudo ~/code/wireguard-dup/run.sh en6
+```
+
+### Verifying
+
+To check client status, run the following command as root:
+
+```bash
+(echo get=1; echo; ) | nc -W 1 -U /var/run/wireguard/$VPN_CLIENT_IF.sock
+```
+
+To check server status, run the following command as root:
+
+```bash
+(echo get=1; echo; ) | nc -W 1 -U /var/run/wireguard/$VPN_SERVER_IF.sock
+```
+
+Both commands should return two endpoints in the `endpoint` variable. The
+server should report two different IP addresses for the endpoints: one
+for your wifi connection, the second for the tethered phone connection. If
+both endpoints have the same IP, it means that the pf-based port rediction
+script did not work as expected.
+
+## Possible improvements
+
+- Patch the `wg` command line tool to support multiple endpoints. This should
+  significantly simplify setup, since we'll be able to use `wg` instead of
+  sending configuration to the Wireguard socket directly.
+- Adjust Mac OS script to not override the pf rules completely, but rather
+  add and remove them.
