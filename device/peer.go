@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.zx2c4.com/wireguard/conn"
 )
 
@@ -140,6 +141,9 @@ func (peer *Peer) SendBuffer(buffer []byte) error {
 	}
 	if len(errs) < len(peer.endpoints) {
 		atomic.AddUint64(&peer.stats.txBytes, uint64(len(buffer)))
+		peerLabels := prometheus.Labels{"peer": peer.String()}
+		peerPacketsSent.With(peerLabels).Inc()
+		peerBytesSent.With(peerLabels).Add(float64(len(buffer)))
 	}
 	if len(errs) == 1 {
 		return errs[0]
@@ -284,6 +288,9 @@ func (peer *Peer) SetEndpointFromPacket(endpoint conn.Endpoint) {
 	}
 	peer.Lock()
 	defer peer.Unlock()
+	for _, e := range peer.endpoints {
+		peer.device.log.Verbosef("peer %s endpoint src=%s dst=%s", peer.String(), e.SrcToString(), e.DstToString())
+	}
 	for idx, e := range peer.endpoints {
 		if e == endpoint {
 			return

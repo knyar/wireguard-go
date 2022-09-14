@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -403,6 +404,8 @@ func (peer *Peer) RoutineSequentialReceiver() {
 	device.log.Verbosef("%v - Routine: sequential receiver - started", peer)
 
 	for elem := range peer.queue.inbound.c {
+		endpointLabels := prometheus.Labels{"peer": peer.String(), "endpoint": elem.endpoint.DstToString()}
+
 		if elem == nil {
 			return
 		}
@@ -413,8 +416,13 @@ func (peer *Peer) RoutineSequentialReceiver() {
 			goto skip
 		}
 
+		peerPacketsReceived.With(endpointLabels).Inc()
+		peerBytesReceived.With(endpointLabels).Add(float64(len(elem.packet) + MinMessageSize))
+
 		peer.SetEndpointFromPacket(elem.endpoint)
 		if !elem.keypair.replayFilter.ValidateCounter(elem.counter, RejectAfterMessages) {
+			peerPacketsDropped.With(endpointLabels).Inc()
+			peerBytesDropped.With(endpointLabels).Add(float64(len(elem.packet) + MinMessageSize))
 			goto skip
 		}
 

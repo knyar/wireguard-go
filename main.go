@@ -9,12 +9,14 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
 	"strconv"
 	"syscall"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/ipc"
@@ -30,6 +32,7 @@ const (
 	ENV_WG_TUN_FD             = "WG_TUN_FD"
 	ENV_WG_UAPI_FD            = "WG_UAPI_FD"
 	ENV_WG_PROCESS_FOREGROUND = "WG_PROCESS_FOREGROUND"
+	ENV_WG_METRIC_ENDPOINT    = "WG_METRIC_ENDPOINT"
 )
 
 func printUsage() {
@@ -174,8 +177,16 @@ func main() {
 		os.Exit(ExitSetupFailed)
 		return
 	}
-	// daemonize the process
 
+	metricEndpoint := os.Getenv(ENV_WG_METRIC_ENDPOINT)
+	if metricEndpoint == "" {
+		metricEndpoint = ":8081"
+	}
+	logger.Verbosef("Starting metric server on %s", metricEndpoint)
+	http.Handle("/metrics", promhttp.Handler())
+	go http.ListenAndServe(metricEndpoint, nil)
+
+	// daemonize the process
 	if !foreground {
 		env := os.Environ()
 		env = append(env, fmt.Sprintf("%s=3", ENV_WG_TUN_FD))
