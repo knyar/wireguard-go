@@ -282,20 +282,28 @@ func (peer *Peer) Stop() {
 	peer.ZeroAndFlushAll()
 }
 
+var ignoreSrcEndpoints = []string{"", "0.0.0.0", "::"}
+
 func (peer *Peer) SetEndpointFromPacket(endpoint conn.Endpoint) {
 	if peer.disableRoaming {
 		return
 	}
 	peer.Lock()
 	defer peer.Unlock()
-	for _, e := range peer.endpoints {
-		peer.device.log.Verbosef("peer %s endpoint src=%s dst=%s", peer.String(), e.SrcToString(), e.DstToString())
-	}
 	for idx, e := range peer.endpoints {
 		if e == endpoint {
 			return
 		}
-		if e.SrcToString() != "" && e.SrcToString() == endpoint.SrcToString() {
+		for _, ign := range ignoreSrcEndpoints {
+			if e.SrcToString() == ign {
+				if e.DstToString() == endpoint.DstToString() {
+					peer.endpoints[idx] = endpoint
+					return
+				}
+				continue
+			}
+		}
+		if e.SrcToString() == endpoint.SrcToString() {
 			// Update existing endpoint for the same source address.
 			peer.endpoints[idx] = endpoint
 			return
