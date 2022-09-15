@@ -404,7 +404,11 @@ func (peer *Peer) RoutineSequentialReceiver() {
 	device.log.Verbosef("%v - Routine: sequential receiver - started", peer)
 
 	for elem := range peer.queue.inbound.c {
-		endpointLabels := prometheus.Labels{"peer": peer.String(), "endpoint": elem.endpoint.DstToString()}
+		endpointLabels := prometheus.Labels{
+			"peer": peer.String(),
+			"src":  elem.endpoint.SrcToString(),
+			"dst":  elem.endpoint.DstToString(),
+		}
 
 		if elem == nil {
 			return
