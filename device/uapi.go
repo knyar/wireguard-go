@@ -266,7 +266,7 @@ func (peer *ipcSetPeer) handlePostConfig() {
 	if peer.Peer == nil || peer.dummy {
 		return
 	}
-	if peer.created {
+	if peer.created && !peer.disableRoaming {
 		peer.disableRoaming = peer.device.net.brokenRoaming && len(peer.endpoints) > 0
 	}
 	if peer.device.isUp() {
@@ -354,6 +354,15 @@ func (device *Device) handlePeerLine(peer *ipcSetPeer, key, value string) error 
 			}
 			peer.endpoints = append(peer.endpoints, endpoint)
 		}
+		peer.Unlock()
+
+	case "disable_roaming":
+		device.log.Verbosef("%v - UAPI: Disabling roaming", peer.Peer)
+		peer.Lock()
+		if value != "true" {
+			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set disable_roaming, invalid value: %v", value)
+		}
+		peer.disableRoaming = true
 		peer.Unlock()
 
 	case "persistent_keepalive_interval":

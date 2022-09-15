@@ -147,6 +147,7 @@ ifconfig $VPN_CLIENT_IF inet $VPN_CLIENT_IP/32 $VPN_SERVER_IP
   echo replace_allowed_ips=true;
   echo allowed_ip=$VPN_NET;
   echo endpoint=$SERVER_EXTERNAL_IP:$SERVER_PORT1,$SERVER_EXTERNAL_IP:$SERVER_PORT2;
+  echo disable_roaming=true;
   echo ;
 ) | nc -U /var/run/wireguard/$VPN_CLIENT_IF.sock
 
