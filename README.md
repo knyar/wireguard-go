@@ -61,12 +61,14 @@ export CLIENT_KEY_PUB=$(base64 -d wg-client-pub | xxd -c 100 -p)
 iptables -A INPUT -p udp -m udp --dport $SERVER_PORT1 -j ACCEPT
 ```
 
-Configure a DNAT entry for traffic for the second UDP port to be sent 
-to the first one:
+Configure a DNAT firewall rule to make traffic for the second UDP port to be
+directed to the first port on a different IP address. It's important for
+peer endpoint management for this to be a different IP than
+`$SERVER_EXTERNAL_IP`; a localhost port usually works well.
 
 ```bash
 iptables -t nat -A PREROUTING -d $SERVER_EXTERNAL_IP -p udp -m udp \
-  --dport $SERVER_PORT2 -j DNAT --to-destination $SERVER_EXTERNAL_IP:$SERVER_PORT1
+  --dport $SERVER_PORT2 -j DNAT --to-destination 127.0.0.1:$SERVER_PORT1
 ```
 
 Add a systemd unit file, `/etc/systemd/system/wireguard_dup.service`
