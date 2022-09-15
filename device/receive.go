@@ -406,8 +406,8 @@ func (peer *Peer) RoutineSequentialReceiver() {
 	for elem := range peer.queue.inbound.c {
 		endpointLabels := prometheus.Labels{
 			"peer": peer.String(),
-			"src":  elem.endpoint.SrcToString(),
-			"dst":  elem.endpoint.DstToString(),
+			"us":   elem.endpoint.SrcToString(),
+			"them": elem.endpoint.DstToString(),
 		}
 
 		if elem == nil {
