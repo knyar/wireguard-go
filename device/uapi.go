@@ -111,7 +111,7 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
 				if len(peer.endpoints) > 0 {
 					var endpoints []string
 					for _, endpoint := range peer.endpoints {
-						endpoints = append(endpoints, endpoint.DstToString())
+						endpoints = append(endpoints, fmt.Sprintf("%s/%s", endpoint.SrcToString(), endpoint.DstToString()))
 					}
 					sendf("endpoint=%s", strings.Join(endpoints, ","))
 				}
