@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"golang.zx2c4.com/wireguard/conn"
 )
 
@@ -135,15 +134,16 @@ func (peer *Peer) SendBuffer(buffer []byte) error {
 
 	var errs []error
 	for _, endpoint := range peer.endpoints {
-		if err := peer.device.net.bind.Send(buffer, endpoint); err != nil {
+		if err := peer.device.net.bind.Send(buffer, endpoint); err == nil {
+			labels := metricLabels(peer, endpoint)
+			peerPacketsSent.With(labels).Inc()
+			peerBytesSent.With(labels).Add(float64(len(buffer)))
+		} else {
 			errs = append(errs, err)
 		}
 	}
 	if len(errs) < len(peer.endpoints) {
 		atomic.AddUint64(&peer.stats.txBytes, uint64(len(buffer)))
-		peerLabels := prometheus.Labels{"peer": peer.String()}
-		peerPacketsSent.With(peerLabels).Inc()
-		peerBytesSent.With(peerLabels).Add(float64(len(buffer)))
 	}
 	if len(errs) == 1 {
 		return errs[0]
