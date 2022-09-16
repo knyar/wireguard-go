@@ -96,6 +96,7 @@ ExecStartPost=bash -c '( \\
   echo public_key=$CLIENT_KEY_PUB; \\
   echo replace_allowed_ips=true; \\
   echo allowed_ip=$VPN_NET; \\
+  echo persistent_keepalive_interval=25; \\
   echo ; \\
 ) | nc -W 1 -U /var/run/wireguard/$VPN_SERVER_IF.sock'
 ExecStartPost=/sbin/ip route add $VPN_NET via $VPN_SERVER_IP
@@ -150,6 +151,7 @@ ifconfig $VPN_CLIENT_IF inet $VPN_CLIENT_IP/32 $VPN_SERVER_IP
   echo allowed_ip=$VPN_NET;
   echo endpoint=$SERVER_EXTERNAL_IP:$SERVER_PORT1,$SERVER_EXTERNAL_IP:$SERVER_PORT2;
   echo disable_roaming=true;
+  echo persistent_keepalive_interval=25;
   echo ;
 ) | nc -U /var/run/wireguard/$VPN_CLIENT_IF.sock
 
