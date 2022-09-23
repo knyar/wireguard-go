@@ -403,11 +403,12 @@ func (peer *Peer) RoutineSequentialReceiver() {
 	device.log.Verbosef("%v - Routine: sequential receiver - started", peer)
 
 	for elem := range peer.queue.inbound.c {
-		labels := metricLabels(peer, elem.endpoint)
-
 		if elem == nil {
 			return
 		}
+
+		labels := metricLabels(peer, elem.endpoint)
+
 		var err error
 		elem.Lock()
 		if elem.packet == nil {
