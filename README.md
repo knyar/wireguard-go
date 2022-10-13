@@ -149,7 +149,8 @@ ifconfig $VPN_CLIENT_IF inet $VPN_CLIENT_IP/32 $VPN_SERVER_IP
   echo public_key=$SERVER_KEY_PUB;
   echo replace_allowed_ips=true;
   echo allowed_ip=$VPN_NET;
-  echo endpoint=$SERVER_EXTERNAL_IP:$SERVER_PORT1,$SERVER_EXTERNAL_IP:$SERVER_PORT2;
+  echo endpoint=$SERVER_EXTERNAL_IP:$SERVER_PORT1;
+  echo endpoint=$SERVER_EXTERNAL_IP:$SERVER_PORT2;
   echo disable_roaming=true;
   echo persistent_keepalive_interval=25;
   echo ;
@@ -208,6 +209,9 @@ server should report two different IP addresses for the endpoints: one
 for your wifi connection, the second for the tethered phone connection. If
 both endpoints have the same IP, it means that the pf-based port rediction
 script did not work as expected.
+
+Note that the upstream `wg show` command will always only show a single
+endpoint.
 
 ## Possible improvements
 

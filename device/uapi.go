@@ -108,12 +108,8 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
 				keyf("public_key", (*[32]byte)(&peer.handshake.remoteStatic))
 				keyf("preshared_key", (*[32]byte)(&peer.handshake.presharedKey))
 				sendf("protocol_version=1")
-				if len(peer.endpoints) > 0 {
-					var endpoints []string
-					for _, endpoint := range peer.endpoints {
-						endpoints = append(endpoints, endpoint.DstToString())
-					}
-					sendf("endpoint=%s", strings.Join(endpoints, ","))
+				for _, endpoint := range peer.endpoints {
+					sendf("endpoint=%s", endpoint.DstToString())
 				}
 
 				nano := atomic.LoadInt64(&peer.stats.lastHandshakeNano)
@@ -345,15 +341,13 @@ func (device *Device) handlePeerLine(peer *ipcSetPeer, key, value string) error 
 		}
 
 	case "endpoint":
-		device.log.Verbosef("%v - UAPI: Updating endpoint", peer.Peer)
-		peer.Lock()
-		for _, endpointStr := range strings.Split(value, ",") {
-			endpoint, err := device.net.bind.ParseEndpoint(endpointStr)
-			if err != nil {
-				return ipcErrorf(ipc.IpcErrorInvalid, "failed to set endpoint %v: %w", value, err)
-			}
-			peer.endpoints = append(peer.endpoints, endpoint)
+		device.log.Verbosef("%v - UAPI: Adding endpoint", peer.Peer)
+		endpoint, err := device.net.bind.ParseEndpoint(value)
+		if err != nil {
+			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set endpoint %v: %w", value, err)
 		}
+		peer.Lock()
+		peer.endpoints = append(peer.endpoints, endpoint)
 		peer.Unlock()
 
 	case "disable_roaming":
